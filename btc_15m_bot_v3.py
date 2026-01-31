@@ -735,10 +735,17 @@ class PolymarketBotV3:
         # logger.info(f"配置: 止损线 -{self.stop_loss_pct*100}% | 模拟费率 {self.fee_pct*100}%") # Moved to load_config
         if self.paper_trade: logger.info("[模式] 模拟交易 (全权限托管)")
         
-        # Start Background Tasks
-        asyncio.create_task(self.trade_logger.run()) # Start Async File Writer
-        asyncio.create_task(self.auto_retrain_loop())
-        asyncio.create_task(self.config_watcher()) # Start Hot-Reloader
+        # Start Background Tasks with exception handling
+        async def _task_wrapper(coro, name):
+            """Wrapper to catch and log task exceptions"""
+            try:
+                await coro
+            except Exception as e:
+                logger.error(f"[Task:{name}] 异常: {e}")
+        
+        asyncio.create_task(_task_wrapper(self.trade_logger.run(), "TradeLogger"))
+        asyncio.create_task(_task_wrapper(self.auto_retrain_loop(), "AutoRetrain"))
+        asyncio.create_task(_task_wrapper(self.config_watcher(), "ConfigWatcher"))
         
         while self.running:
             try:
@@ -823,13 +830,26 @@ class PolymarketBotV3:
             except Exception as e:
                 logger.error(f"Auto-retrain failed: {e}")
 
+    async def _ws_listen_wrapper(self, ws_manager):
+        """[Bugfix] WebSocket listener wrapper with exception handling"""
+        try:
+            await ws_manager.listen()
+        except Exception as e:
+            logger.error(f"[WebSocket] 监听异常: {e}")
+        finally:
+            logger.warning("[WebSocket] 监听任务结束")
+    
     async def trade_loop(self, market: Market15m):
         # For brevity in this write, using polling loop which is fine for 5s intervals.
         # Ideally keep WS from V2.
         
         ws_manager = WebSocketManagerV3(market)
-        await ws_manager.connect()
-        asyncio.create_task(ws_manager.listen())
+        try:
+            await ws_manager.connect()
+            asyncio.create_task(self._ws_listen_wrapper(ws_manager))
+            logger.info("[WebSocket] 连接成功，监听已启动")
+        except Exception as e:
+            logger.error(f"[WebSocket] 连接失败: {e}，将使用轮询模式")
         
         logger.info(f"开始监控... 结算时间: {market.end_time}")
         
