@@ -1713,16 +1713,45 @@ class WebSocketManagerV3:
         await self.ws.send(json.dumps(msg))
         self.running = True
     async def listen(self):
-        try:
-            async for msg in self.ws:
-                if not self.running: break
-                if msg == "PONG": continue
+        """[CRITICAL-Fix] WebSocket listener with auto-reconnect"""
+        reconnect_delay = 5  # Initial retry delay
+        max_reconnect_delay = 60  # Max retry delay
+        
+        while self.running:
+            try:
+                async for msg in self.ws:
+                    if not self.running: break
+                    if msg == "PONG": 
+                        continue
+                    try:
+                        data = json.loads(msg)
+                        if isinstance(data, list): 
+                            [self._process(i) for i in data]
+                        else: 
+                            self._process(data)
+                    except Exception as e:
+                        logger.debug(f"[WebSocket] Message processing error: {e}")
+                
+                # Normal disconnect (not exception)
+                if not self.running:
+                    break
+                    
+            except Exception as e:
+                logger.error(f"[WebSocket] Connection error: {e}")
+            
+            # Attempt reconnect
+            if self.running:
+                logger.warning(f"[WebSocket] Disconnected. Reconnecting in {reconnect_delay}s...")
+                await asyncio.sleep(reconnect_delay)
                 try:
-                    data = json.loads(msg)
-                    if isinstance(data, list): [self._process(i) for i in data]
-                    else: self._process(data)
-                except: pass
-        except: pass
+                    await self.connect()
+                    logger.info("[WebSocket] Reconnected successfully")
+                    reconnect_delay = 5  # Reset delay on success
+                except Exception as e:
+                    logger.error(f"[WebSocket] Reconnect failed: {e}")
+                    reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+            
+        logger.info("[WebSocket] Listener stopped")
     def _process(self, data):
         asset = data.get("asset_id")
         if asset == self.market.token_id_up: self.market.book_up.update(data)
