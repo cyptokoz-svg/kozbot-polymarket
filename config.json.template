@@ -1,0 +1,13 @@
+{
+    "stop_loss_pct": 0.35,
+    "safety_margin_pct": 0.0006,
+    "min_edge": 0.15,
+    "fee_pct": 0.03,
+    "obi_threshold": 1.8,
+    "trade_amount_usd": 100,
+    "notion_token": "YOUR_NOTION_TOKEN_HERE",
+    "notion_database_id": "YOUR_DATABASE_ID_HERE",
+    "max_positions": 1,
+    "execution_enabled": false,
+    "log_level": "INFO"
+}
