@@ -338,6 +338,7 @@ class DeribitData:
         except Exception as e:
             logger.error(f"Deribit DVOL fetch failed: {e}")
             return None
+            return None
 
 class PolyLiquidity:
     """Analyzer for Polymarket Order Book Depth & Quality"""
@@ -854,36 +855,45 @@ class PolymarketBotV3:
         logger.info(f"开始监控... 结算时间: {market.end_time}")
         
         while self.running and market.is_active:
-            # 1. Get Data
-            current_btc = BinanceData.get_current_price()
-            if not current_btc:
-                await asyncio.sleep(2)
-                continue
-                
-            # Update Dynamic Volatility (every ~1 min)
-            if int(time.time()) % 60 == 0:
-                # 1. Try Deribit First (Forward Looking)
-                dvol = DeribitData.get_dvol()
-                if dvol:
-                    self.strategy.update_from_deribit(dvol, current_btc)
-                else:
-                    # 2. Fallback to Binance Historical
-                    new_vol = BinanceData.get_dynamic_volatility()
-                    self.strategy.update_volatility(new_vol)
-                # logger.info(f"🌊 动态波动率更新完成")
+            try:
+                # 1. Get Data
+                try:
+                    current_btc = BinanceData.get_current_price()
+                except Exception as e:
+                    logger.warning(f"[Data] BTC price fetch error: {e}")
+                    current_btc = None
+                    
+                if not current_btc:
+                    await asyncio.sleep(2)
+                    continue
+                    
+                # Update Dynamic Volatility (every ~1 min)
+                if int(time.time()) % 60 == 0:
+                    try:
+                        # 1. Try Deribit First (Forward Looking)
+                        dvol = DeribitData.get_dvol()
+                        if dvol:
+                            self.strategy.update_from_deribit(dvol, current_btc)
+                        else:
+                            # 2. Fallback to Binance Historical
+                            new_vol = BinanceData.get_dynamic_volatility()
+                            self.strategy.update_volatility(new_vol)
+                    except Exception as e:
+                        logger.warning(f"[Data] Volatility update error: {e}")
+                    # logger.info(f"🌊 动态波动率更新完成")
 
-            time_left = market.time_remaining.total_seconds() / 60.0 # minutes
-            
-            # 2. Calculate Fair Value
-            prob_up = self.strategy.calculate_prob_up(current_btc, market.strike_price, time_left)
-            prob_down = 1.0 - prob_up
-            
-            # [Pre-Fetch] Get Poly Liquidity Data needed for ML & Filters
-            # We need to decide which token to check. Let's check BOTH or just the one we lean towards?
-            # For ML, general market quality matters. Let's check the UP token depth as a proxy or average?
-            # Better: Check both briefly or just the spread/depth of the orderbook general.
-            # Using token_id_up as reference.
-            liq_data = PolyLiquidity.get_token_depth(market.token_id_up)
+                time_left = market.time_remaining.total_seconds() / 60.0 # minutes
+                
+                # 2. Calculate Fair Value
+                prob_up = self.strategy.calculate_prob_up(current_btc, market.strike_price, time_left)
+                prob_down = 1.0 - prob_up
+                
+                # [Pre-Fetch] Get Poly Liquidity Data needed for ML & Filters
+                try:
+                    liq_data = PolyLiquidity.get_token_depth(market.token_id_up)
+                except Exception as e:
+                    logger.warning(f"[Data] Liquidity fetch error: {e}")
+                    liq_data = {"spread": 0.01, "bid_depth": 0, "ask_depth": 0}
             
             # 3. Compare with Market (Moved up for scope)
             mkt_up = market.up_price
