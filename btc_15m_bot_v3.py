@@ -74,15 +74,25 @@ class OrderBook:
     best_bid_size: float = 0.0
     best_ask: float = 1.0
     best_ask_size: float = 0.0
+    last_update: float = 0.0  # [新增] 最后更新时间戳
+    update_count: int = 0     # [新增] 更新次数，用于判断数据新鲜度
     
     def update(self, data: dict):
+        """Update order book with validation"""
+        now = time.time()
+        
         if data.get("event_type") == "price_change":
             for change in data.get("price_changes", []):
                 if change.get("asset_id") == self.asset_id:
-                    # [CRITICAL-Fix] Only update if value is present and not None
+                    # [CRITICAL-Fix] 验证价格合理性后再更新
                     new_bid = change.get("best_bid")
                     if new_bid is not None:
-                        self.best_bid = float(new_bid)
+                        new_bid_float = float(new_bid)
+                        # 价格必须在合理范围 0.01 ~ 0.99
+                        if 0.01 <= new_bid_float <= 0.99:
+                            self.best_bid = new_bid_float
+                        else:
+                            logger.warning(f"[OrderBook] 忽略异常 best_bid: {new_bid_float} (超出 0.01~0.99)")
                     
                     new_bid_size = change.get("best_bid_size")
                     if new_bid_size is not None:
@@ -90,21 +100,70 @@ class OrderBook:
                     
                     new_ask = change.get("best_ask")
                     if new_ask is not None:
-                        self.best_ask = float(new_ask)
+                        new_ask_float = float(new_ask)
+                        if 0.01 <= new_ask_float <= 0.99:
+                            self.best_ask = new_ask_float
+                        else:
+                            logger.warning(f"[OrderBook] 忽略异常 best_ask: {new_ask_float} (超出 0.01~0.99)")
                     
                     new_ask_size = change.get("best_ask_size")
                     if new_ask_size is not None:
                         self.best_ask_size = float(new_ask_size)
+                    
+                    # [新增] 记录更新时间和次数
+                    self.last_update = now
+                    self.update_count += 1
 
         elif data.get("event_type") == "book":
-             bids = data.get("bids", [])
-             asks = data.get("asks", [])
-             if bids: 
-                 self.best_bid = float(bids[0]["price"])
-                 self.best_bid_size = float(bids[0]["size"])
-             if asks: 
-                 self.best_ask = float(asks[0]["price"])
-                 self.best_ask_size = float(asks[0]["size"])
+            bids = data.get("bids", [])
+            asks = data.get("asks", [])
+            
+            # [新增] 验证并更新 best_bid
+            if bids:
+                bid_price = float(bids[0]["price"])
+                if 0.01 <= bid_price <= 0.99:
+                    self.best_bid = bid_price
+                    self.best_bid_size = float(bids[0]["size"])
+                else:
+                    logger.warning(f"[OrderBook] Book更新忽略异常 bid: {bid_price}")
+            
+            # [新增] 验证并更新 best_ask
+            if asks:
+                ask_price = float(asks[0]["price"])
+                if 0.01 <= ask_price <= 0.99:
+                    self.best_ask = ask_price
+                    self.best_ask_size = float(asks[0]["size"])
+                else:
+                    logger.warning(f"[OrderBook] Book更新忽略异常 ask: {ask_price}")
+            
+            self.last_update = now
+            self.update_count += 1
+    
+    def is_fresh(self, max_age_sec: float = 30.0) -> bool:
+        """[新增] 检查数据是否新鲜"""
+        if self.last_update == 0:
+            return False
+        return (time.time() - self.last_update) <= max_age_sec
+    
+    def is_valid(self) -> bool:
+        """[新增] 检查价格是否有效且合理"""
+        # 基本范围检查
+        if not (0.01 <= self.best_bid <= 0.99):
+            return False
+        if not (0.01 <= self.best_ask <= 0.99):
+            return False
+        # 价差检查 (ask 应该 >= bid)
+        if self.best_ask < self.best_bid:
+            return False
+        # 价差过大检查 (>50% 可能是异常)
+        spread = self.best_ask - self.best_bid
+        if spread > 0.5:
+            return False
+        return True
+    
+    def get_mid_price(self) -> float:
+        """[新增] 获取中间价"""
+        return (self.best_bid + self.best_ask) / 2
 
 @dataclass
 class Market15m:
@@ -1203,13 +1262,29 @@ class PolymarketBotV3:
             if p.get("status") != "OPEN": continue
             if p.get("exit_checked", False): continue
             
+            # [CRITICAL-Fix] 选择正确的 OrderBook
             if p["direction"] == "UP":
-                current_bid = market.book_up.best_bid
+                book = market.book_up
             else:
-                current_bid = market.book_down.best_bid
+                book = market.book_down
             
-            if current_bid <= 0: continue
+            # [CRITICAL-Fix] 全面的数据健康检查
+            # 1. 检查是否有更新过
+            if book.update_count < 2:
+                logger.debug(f"[check_exit] {p['direction']} 数据更新次数不足 ({book.update_count})，跳过")
+                continue
             
+            # 2. 检查数据新鲜度 (< 30秒)
+            if not book.is_fresh(max_age_sec=30.0):
+                logger.warning(f"[check_exit] {p['direction']} 数据不新鲜 (最后更新: {time.time() - book.last_update:.1f}s前)，跳过")
+                continue
+            
+            # 3. 检查价格有效性
+            if not book.is_valid():
+                logger.warning(f"[check_exit] {p['direction']} 价格数据无效 (bid={book.best_bid}, ask={book.best_ask})，跳过")
+                continue
+            
+            current_bid = book.best_bid
             entry_price = p["entry_price"]
             pnl_pct = (current_bid - entry_price) / entry_price
             exit_price = round(current_bid, 2)
@@ -1355,6 +1430,21 @@ class PolymarketBotV3:
         if self.paper_trade:
             # 模拟交易逻辑 - 完整复刻实盘流程
             try:
+                # [CRITICAL-Fix] 开仓前检查数据健康
+                if direction == "UP":
+                    book = market.book_up
+                else:
+                    book = market.book_down
+                
+                # 检查数据新鲜度和有效性
+                if not book.is_fresh(max_age_sec=30.0):
+                    logger.warning(f"[开仓] {direction} 数据不新鲜，跳过开仓")
+                    return
+                
+                if not book.is_valid():
+                    logger.warning(f"[开仓] {direction} 价格数据无效 (bid={book.best_bid}, ask={book.best_ask})，跳过开仓")
+                    return
+                
                 # [CRITICAL-Fix] 开仓价格必须与止盈检查一致！
                 # 用实际能成交的价格，不是中间价
                 if direction == "UP":
