@@ -1819,5 +1819,55 @@ class WebSocketManagerV3:
         self.running = False
         if self.ws: await self.ws.close()
 
+async def main_loop_with_restart():
+    """[CRITICAL-Fix] Main loop with crash recovery"""
+    restart_count = 0
+    max_restarts = 100  # Prevent infinite restart loops
+    
+    while restart_count < max_restarts:
+        try:
+            logger.info(f"🚀 Starting Bot (attempt #{restart_count + 1})")
+            bot = PolymarketBotV3()
+            await bot.run()
+            # If run() returns normally, break the loop
+            logger.info("Bot stopped normally")
+            break
+            
+        except KeyboardInterrupt:
+            logger.info("👋 Bot stopped by user (KeyboardInterrupt)")
+            break
+            
+        except Exception as e:
+            restart_count += 1
+            logger.critical(f"💥 CRITICAL ERROR - Bot crashed: {e}")
+            logger.critical(f"💥 Stack trace:", exc_info=True)
+            logger.critical(f"🔄 Restarting in 10 seconds... (attempt {restart_count}/{max_restarts})")
+            
+            # Notify user of crash
+            try:
+                import requests
+                TOKEN_FILE = "/home/ubuntu/clawd/.telegram_bot_token"
+                if os.path.exists(TOKEN_FILE):
+                    with open(TOKEN_FILE, 'r') as f:
+                        token = f.read().strip()
+                    msg = f"🚨 Bot CRASHED!\nError: {str(e)[:100]}\nRestarting... ({restart_count}/{max_restarts})"
+                    requests.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        data={"chat_id": "1640598145", "text": msg},
+                        timeout=5
+                    )
+            except:
+                pass
+            
+            await asyncio.sleep(10)
+    
+    if restart_count >= max_restarts:
+        logger.critical("❌ Max restarts reached. Bot will not restart automatically.")
+
 if __name__ == "__main__":
-    asyncio.run(PolymarketBotV3().run())
+    # Set up top-level exception handler
+    try:
+        asyncio.run(main_loop_with_restart())
+    except Exception as e:
+        logger.critical(f"💥 FATAL ERROR in main: {e}", exc_info=True)
+        raise
