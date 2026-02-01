@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-01T09:06:54Z",
+  "check_type": "bot-health-check",
+  "status": "HEALTHY",
+  "service": {
+    "name": "polymarket-bot",
+    "active": true,
+    "pid": 21152,
+    "uptime": "4h 52m",
+    "started": "2026-02-01T04:14:45Z"
+  },
+  "resources": {
+    "memory_mb": 125.1,
+    "memory_peak_mb": 137.2,
+    "cpu_time": "17m 27s"
+  },
+  "issues": [],
+  "warnings": [
+    "Edge DOWN 极端值截断 (正常现象)"
+  ],
+  "actions_taken": "无需操作，运行正常",
+  "next_check": "2026-02-01T10:06:54Z"
+}

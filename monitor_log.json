@@ -1,0 +1,43 @@
+{
+  "last_check": "2026-02-01T13:58:00Z",
+  "status": "healthy",
+  "service": {
+    "active": true,
+    "pid": 48604,
+    "uptime": "19m",
+    "memory": "200.3M",
+    "cpu_time": "1m 18s"
+  },
+  "errors": {
+    "critical": 0,
+    "warnings": 2,
+    "details": [
+      {
+        "time": "2026-02-01T13:58:00Z",
+        "type": "OrderBookAnomaly",
+        "message": "异常报价过滤 (bid: 0.001 / ask: 0.999)",
+        "resolved": false,
+        "note": "市场切换期间正常行为"
+      },
+      {
+        "time": "2026-02-01T13:58:00Z",
+        "type": "LowLiquidity",
+        "message": "Ask Depth $0 < $200 跳过",
+        "resolved": false,
+        "note": "正常风控过滤"
+      }
+    ]
+  },
+  "trading": {
+    "date": "2026-02-01",
+    "tp_count": 8,
+    "sl_count": 6,
+    "win_rate": "57.1%",
+    "pnl": 0.15,
+    "status": "slight_profit"
+  },
+  "restarts": {
+    "today": 0,
+    "reason": null
+  }
+}

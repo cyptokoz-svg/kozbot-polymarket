@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-02-01T10:35:19Z",
+  "status": "HEALTHY",
+  "service": {
+    "active": true,
+    "uptime_hours": 6.3,
+    "pid": 21152,
+    "memory_mb": 125.8,
+    "memory_peak_mb": 141.8,
+    "cpu_time": "22m45s"
+  },
+  "checks": {
+    "process_running": true,
+    "log_active": true,
+    "crashes_detected": 0,
+    "errors_critical": 0
+  },
+  "last_trade": "2026-01-31T23:50:44Z",
+  "action": "none_required"
+}

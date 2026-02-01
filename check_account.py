@@ -18,7 +18,10 @@ def main():
     print("Polymarket 账户检查")
     print("=" * 50)
     print(f"Funder 地址: {funder}")
-    print(f"私钥: {private_key[:8]}...{private_key[-4:]}")
+    if private_key:
+        print(f"✓ 私钥已配置 (长度: {len(private_key)} 字符)")
+    else:
+        print("✗ 私钥未配置")
     print()
     
     # 初始化客户端

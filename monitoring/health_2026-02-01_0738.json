@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-02-01T07:38:00Z",
+  "status": "healthy",
+  "pid": 21152,
+  "uptime_hours": 3.38,
+  "memory_mb": 123.9,
+  "cpu_time": "11m12s",
+  "current_market": "Bitcoin Up or Down - February 1, 2:30AM-2:45AM ET",
+  "btc_price": 78320,
+  "strike_price": 78212.25,
+  "actions_taken": [],
+  "errors": [],
+  "notes": "Bot running normally. Edge clipping warnings during volatility."
+}

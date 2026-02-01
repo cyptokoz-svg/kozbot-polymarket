@@ -17,7 +17,7 @@ def check_portfolio():
         # Fetch balance/allowance
         # In newer clob versions, we might need to check specific endpoints
         # Let's try getting account state
-        print(f"🔑 API Key Derived: {api_creds.api_key}")
+        print(f"🔑 API Key Derived: {api_creds.api_key[:8]}...{api_creds.api_key[-4:]}")
         
         # Check USDC balance on the proxy
         # Since I don't know the exact method in this version, I'll try a few

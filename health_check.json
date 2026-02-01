@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-02-01T09:29:20Z",
+  "status": "HEALTHY",
+  "uptime_hours": 5.25,
+  "pid": 21152,
+  "memory_mb": 125.3,
+  "checks": {
+    "service_running": true,
+    "process_exists": true,
+    "no_recent_crashes": true,
+    "no_errors": true
+  },
+  "trading_stats": {
+    "total_trades": 51,
+    "closed_trades": 25,
+    "win_rate": "60.0%",
+    "total_pnl": "-106.93%",
+    "up_trades": 16,
+    "down_trades": 9
+  },
+  "notes": [
+    "Bot running normally for 5h 14min",
+    "Liquidity warnings are expected (market transition periods)",
+    "No restart required",
+    "PnL negative but within expected variance for small sample"
+  ]
+}

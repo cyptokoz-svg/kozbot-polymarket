@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-02-01T09:14:14Z",
+  "bot_status": "HEALTHY",
+  "service": {
+    "name": "polymarket-bot",
+    "status": "active (running)",
+    "pid": 21152,
+    "uptime": "5h 0min",
+    "start_time": "2026-02-01T04:14:45Z",
+    "memory": "126.4M (peak: 137.2M)",
+    "cpu": "17m 52s"
+  },
+  "performance_24h": {
+    "total_trades": 25,
+    "wins": 15,
+    "losses": 10,
+    "win_rate": "60.0%",
+    "total_pnl": "-1.069",
+    "last_trade": "2026-02-01T06:24:16 STOP_LOSS_PAPER PnL: -0.471"
+  },
+  "health_score": "GREEN",
+  "alerts": [],
+  "notes": "Bot running normally. No crashes or errors detected. Recent liquidity warnings are normal market conditions (low depth on some markets)."
+}
