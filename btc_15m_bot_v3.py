@@ -586,9 +586,6 @@ class PolymarketBotV3:
         # [Surgical Refactor] Async Logger
         self.trade_logger = AsyncTradeLogger("paper_trades.jsonl")
         
-        # [Data-Quality] Track WebSocket health - once failed, permanently switch to REST API
-        self.websocket_failed = False
-        
         # Load ML Model (Prefer V2.0 if exists)
         self.ml_model = None
         model_paths = ["ml_model_v2.pkl", "ml_model_v1.pkl"]
@@ -1319,30 +1316,25 @@ class PolymarketBotV3:
             
             # [CRITICAL-Fix] 全面的数据健康检查
             current_bid = None
-            use_rest_api = self.websocket_failed  # Once failed, permanently use REST API
             
-            # 1. 尝试使用 WebSocket 数据 (only if not permanently failed)
-            if not use_rest_api and book.update_count >= 2 and book.is_fresh(max_age_sec=30.0) and book.is_valid():
+            # 1. 尝试使用 WebSocket 数据
+            if book.update_count >= 2 and book.is_fresh(max_age_sec=30.0) and book.is_valid():
                 current_bid = book.best_bid
                 logger.debug(f"[check_exit] {p['direction']} 使用 WebSocket 价格: {current_bid}")
             
-            # 2. [Data-Quality] WebSocket 失效或已标记失效，使用 REST API
+            # 2. [Data-Quality] WebSocket 失效，尝试 REST API 备用
             if current_bid is None:
                 token_id = market.token_id_up if p["direction"] == "UP" else market.token_id_down
                 backup_price = PolyPriceFetcher.get_price(token_id)
                 if backup_price:
                     current_bid, current_ask = backup_price
-                    if not self.websocket_failed:
-                        logger.warning(f"[check_exit] {p['direction']} WebSocket 失效，永久切换到 REST API 模式")
-                        self.websocket_failed = True  # Mark as permanently failed
-                    else:
-                        logger.debug(f"[check_exit] {p['direction']} 使用 REST API 价格: bid={current_bid}")
+                    logger.info(f"[check_exit] {p['direction']} WebSocket 失效，使用 REST API 备用价格: bid={current_bid}")
                     # 更新 OrderBook 以便后续使用
                     book.best_bid = current_bid
                     book.best_ask = current_ask
                     book.last_update = time.time()
                 else:
-                    logger.warning(f"[check_exit] {p['direction']} REST API 也失效，跳过检查")
+                    logger.warning(f"[check_exit] {p['direction']} 所有价格源失效，跳过检查")
                     continue
             
             if current_bid is None:
@@ -1496,36 +1488,26 @@ class PolymarketBotV3:
                 # [CRITICAL-Fix] 开仓前检查数据健康
                 if direction == "UP":
                     book = market.book_up
-                    token_id = market.token_id_up
                 else:
                     book = market.book_down
-                    token_id = market.token_id_down
                 
-                fill_price = None
+                # 检查数据新鲜度和有效性
+                if not book.is_fresh(max_age_sec=30.0):
+                    logger.warning(f"[开仓] {direction} 数据不新鲜，跳过开仓")
+                    return
                 
-                # 1. 尝试使用 WebSocket 数据 (only if not permanently failed)
-                if not self.websocket_failed:
-                    if book.is_fresh(max_age_sec=30.0) and book.is_valid():
-                        fill_price = book.best_ask
-                        logger.debug(f"[开仓] {direction} 使用 WebSocket 价格: {fill_price}")
-                    else:
-                        logger.warning(f"[开仓] {direction} WebSocket 数据异常，切换到 REST API")
-                        self.websocket_failed = True
+                if not book.is_valid():
+                    logger.warning(f"[开仓] {direction} 价格数据无效 (bid={book.best_bid}, ask={book.best_ask})，跳过开仓")
+                    return
                 
-                # 2. WebSocket 已失效或数据异常，使用 REST API
-                if fill_price is None:
-                    rest_price = PolyPriceFetcher.get_price(token_id)
-                    if rest_price:
-                        bid, ask = rest_price
-                        fill_price = ask
-                        logger.info(f"[开仓] {direction} 使用 REST API 价格: {fill_price}")
-                        # 更新 book
-                        book.best_bid = bid
-                        book.best_ask = ask
-                        book.last_update = time.time()
-                    else:
-                        logger.error(f"[开仓] {direction} 所有价格源失效，跳过开仓")
-                        return
+                # [CRITICAL-Fix] 开仓价格必须与止盈检查一致！
+                # 用实际能成交的价格，不是中间价
+                if direction == "UP":
+                    # 买 UP，用 best_ask (卖一价)
+                    fill_price = market.book_up.best_ask if market.book_up.best_ask > 0 else price
+                else:
+                    # 买 DOWN，用 best_ask (卖一价)
+                    fill_price = market.book_down.best_ask if market.book_down.best_ask > 0 else price
                 
                 fill_price = round(min(0.99, max(0.01, fill_price)), 2)
                 
