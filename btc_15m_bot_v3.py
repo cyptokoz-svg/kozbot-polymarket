@@ -88,11 +88,11 @@ class OrderBook:
                     new_bid = change.get("best_bid")
                     if new_bid is not None:
                         new_bid_float = float(new_bid)
-                        # 价格必须在合理范围 0.01 ~ 0.99
-                        if 0.01 <= new_bid_float <= 0.99:
+                        # [Data-Quality] 严格过滤异常值 (0.01/0.99 是常见错误值)
+                        if 0.02 <= new_bid_float <= 0.98:
                             self.best_bid = new_bid_float
                         else:
-                            logger.warning(f"[OrderBook] 忽略异常 best_bid: {new_bid_float} (超出 0.01~0.99)")
+                            logger.warning(f"[OrderBook] 忽略异常 best_bid: {new_bid_float} (超出有效范围 0.02~0.98)")
                     
                     new_bid_size = change.get("best_bid_size")
                     if new_bid_size is not None:
@@ -101,10 +101,11 @@ class OrderBook:
                     new_ask = change.get("best_ask")
                     if new_ask is not None:
                         new_ask_float = float(new_ask)
-                        if 0.01 <= new_ask_float <= 0.99:
+                        # [Data-Quality] 严格过滤异常值
+                        if 0.02 <= new_ask_float <= 0.98:
                             self.best_ask = new_ask_float
                         else:
-                            logger.warning(f"[OrderBook] 忽略异常 best_ask: {new_ask_float} (超出 0.01~0.99)")
+                            logger.warning(f"[OrderBook] 忽略异常 best_ask: {new_ask_float} (超出有效范围 0.02~0.98)")
                     
                     new_ask_size = change.get("best_ask_size")
                     if new_ask_size is not None:
@@ -147,10 +148,10 @@ class OrderBook:
     
     def is_valid(self) -> bool:
         """[新增] 检查价格是否有效且合理"""
-        # 基本范围检查
-        if not (0.01 <= self.best_bid <= 0.99):
+        # [Data-Quality] 严格范围检查 (排除 0.01/0.99 错误值)
+        if not (0.02 <= self.best_bid <= 0.98):
             return False
-        if not (0.01 <= self.best_ask <= 0.99):
+        if not (0.02 <= self.best_ask <= 0.98):
             return False
         # 价差检查 (ask 应该 >= bid)
         if self.best_ask < self.best_bid:
@@ -338,6 +339,30 @@ class DeribitData:
         except Exception as e:
             logger.error(f"Deribit DVOL fetch failed: {e}")
             return None
+
+class PolyPriceFetcher:
+    """[Data-Quality] Backup price fetcher using REST API when WebSocket fails"""
+    @staticmethod
+    def get_price(token_id: str) -> Optional[Tuple[float, float]]:
+        """Fetch best bid/ask from CLOB REST API"""
+        try:
+            url = f"{CLOB_HOST}/book"
+            params = {"token_id": token_id}
+            resp = requests.get(url, params=params, timeout=3)
+            data = resp.json()
+            
+            bids = data.get("bids", [])
+            asks = data.get("asks", [])
+            
+            if bids and asks:
+                best_bid = float(bids[0]["price"])
+                best_ask = float(asks[0]["price"])
+                # Validate
+                if 0.02 <= best_bid <= 0.98 and 0.02 <= best_ask <= 0.98 and best_ask >= best_bid:
+                    return (best_bid, best_ask)
+            return None
+        except Exception as e:
+            logger.debug(f"[BackupPrice] Fetch error: {e}")
             return None
 
 class PolyLiquidity:
@@ -855,45 +880,36 @@ class PolymarketBotV3:
         logger.info(f"开始监控... 结算时间: {market.end_time}")
         
         while self.running and market.is_active:
-            try:
-                # 1. Get Data
-                try:
-                    current_btc = BinanceData.get_current_price()
-                except Exception as e:
-                    logger.warning(f"[Data] BTC price fetch error: {e}")
-                    current_btc = None
-                    
-                if not current_btc:
-                    await asyncio.sleep(2)
-                    continue
-                    
-                # Update Dynamic Volatility (every ~1 min)
-                if int(time.time()) % 60 == 0:
-                    try:
-                        # 1. Try Deribit First (Forward Looking)
-                        dvol = DeribitData.get_dvol()
-                        if dvol:
-                            self.strategy.update_from_deribit(dvol, current_btc)
-                        else:
-                            # 2. Fallback to Binance Historical
-                            new_vol = BinanceData.get_dynamic_volatility()
-                            self.strategy.update_volatility(new_vol)
-                    except Exception as e:
-                        logger.warning(f"[Data] Volatility update error: {e}")
-                    # logger.info(f"🌊 动态波动率更新完成")
+            # 1. Get Data
+            current_btc = BinanceData.get_current_price()
+            if not current_btc:
+                await asyncio.sleep(2)
+                continue
+                
+            # Update Dynamic Volatility (every ~1 min)
+            if int(time.time()) % 60 == 0:
+                # 1. Try Deribit First (Forward Looking)
+                dvol = DeribitData.get_dvol()
+                if dvol:
+                    self.strategy.update_from_deribit(dvol, current_btc)
+                else:
+                    # 2. Fallback to Binance Historical
+                    new_vol = BinanceData.get_dynamic_volatility()
+                    self.strategy.update_volatility(new_vol)
+                # logger.info(f"🌊 动态波动率更新完成")
 
-                time_left = market.time_remaining.total_seconds() / 60.0 # minutes
-                
-                # 2. Calculate Fair Value
-                prob_up = self.strategy.calculate_prob_up(current_btc, market.strike_price, time_left)
-                prob_down = 1.0 - prob_up
-                
-                # [Pre-Fetch] Get Poly Liquidity Data needed for ML & Filters
-                try:
-                    liq_data = PolyLiquidity.get_token_depth(market.token_id_up)
-                except Exception as e:
-                    logger.warning(f"[Data] Liquidity fetch error: {e}")
-                    liq_data = {"spread": 0.01, "bid_depth": 0, "ask_depth": 0}
+            time_left = market.time_remaining.total_seconds() / 60.0 # minutes
+            
+            # 2. Calculate Fair Value
+            prob_up = self.strategy.calculate_prob_up(current_btc, market.strike_price, time_left)
+            prob_down = 1.0 - prob_up
+            
+            # [Pre-Fetch] Get Poly Liquidity Data needed for ML & Filters
+            # We need to decide which token to check. Let's check BOTH or just the one we lean towards?
+            # For ML, general market quality matters. Let's check the UP token depth as a proxy or average?
+            # Better: Check both briefly or just the spread/depth of the orderbook general.
+            # Using token_id_up as reference.
+            liq_data = PolyLiquidity.get_token_depth(market.token_id_up)
             
             # 3. Compare with Market (Moved up for scope)
             mkt_up = market.up_price
@@ -1299,22 +1315,31 @@ class PolymarketBotV3:
                 book = market.book_down
             
             # [CRITICAL-Fix] 全面的数据健康检查
-            # 1. 检查是否有更新过
-            if book.update_count < 2:
-                logger.debug(f"[check_exit] {p['direction']} 数据更新次数不足 ({book.update_count})，跳过")
-                continue
+            current_bid = None
             
-            # 2. 检查数据新鲜度 (< 30秒)
-            if not book.is_fresh(max_age_sec=30.0):
-                logger.warning(f"[check_exit] {p['direction']} 数据不新鲜 (最后更新: {time.time() - book.last_update:.1f}s前)，跳过")
-                continue
+            # 1. 尝试使用 WebSocket 数据
+            if book.update_count >= 2 and book.is_fresh(max_age_sec=30.0) and book.is_valid():
+                current_bid = book.best_bid
+                logger.debug(f"[check_exit] {p['direction']} 使用 WebSocket 价格: {current_bid}")
             
-            # 3. 检查价格有效性
-            if not book.is_valid():
-                logger.warning(f"[check_exit] {p['direction']} 价格数据无效 (bid={book.best_bid}, ask={book.best_ask})，跳过")
-                continue
+            # 2. [Data-Quality] WebSocket 失效，尝试 REST API 备用
+            if current_bid is None:
+                token_id = market.token_id_up if p["direction"] == "UP" else market.token_id_down
+                backup_price = PolyPriceFetcher.get_price(token_id)
+                if backup_price:
+                    current_bid, current_ask = backup_price
+                    logger.info(f"[check_exit] {p['direction']} WebSocket 失效，使用 REST API 备用价格: bid={current_bid}")
+                    # 更新 OrderBook 以便后续使用
+                    book.best_bid = current_bid
+                    book.best_ask = current_ask
+                    book.last_update = time.time()
+                else:
+                    logger.warning(f"[check_exit] {p['direction']} 所有价格源失效，跳过检查")
+                    continue
             
-            current_bid = book.best_bid
+            if current_bid is None:
+                logger.warning(f"[check_exit] {p['direction']} 无法获取有效价格，跳过")
+                continue
             entry_price = p["entry_price"]
             pnl_pct = (current_bid - entry_price) / entry_price
             exit_price = round(current_bid, 2)
