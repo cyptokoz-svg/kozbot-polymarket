@@ -897,13 +897,14 @@ class PolymarketBotV3:
                     self.fee_pct = conf.get("fee_pct", 0.03)
                     self.obi_threshold = conf.get("obi_threshold", 1.5) # New Param
                     self.trade_amount_usd = conf.get("trade_amount_usd", 1.0) # [New] Load trade amount
+                    self.min_liquidity_usd = conf.get("min_liquidity_usd", 200) # [New] Liquidity threshold
                     self.execution_enabled = conf.get("execution_enabled", False) # Safety Switch
                     self.paper_trade = conf.get("paper_trade", False) # Paper Trading Mode
                     # [CRITICAL] 实盘双重确认机制
                     self.live_trading_enabled = conf.get("live_trading_enabled", False)
                     # Auto-redeem setting
                     self.auto_redeem_enabled = conf.get("auto_redeem_enabled", False)
-                    logger.info(f"⚙️ 配置已加载: SL {self.stop_loss_pct:.0%} | Edge {self.min_edge:.0%} | Amount ${self.trade_amount_usd} | Paper {self.paper_trade} | Live {self.live_trading_enabled} | AutoRedeem {self.auto_redeem_enabled}")
+                    logger.info(f"⚙️ 配置已加载: SL {self.stop_loss_pct:.0%} | Edge {self.min_edge:.0%} | Amount ${self.trade_amount_usd} | Liquidity ${self.min_liquidity_usd} | Paper {self.paper_trade} | Live {self.live_trading_enabled} | AutoRedeem {self.auto_redeem_enabled}")
             else:
                 logger.warning("⚠️ 配置文件未找到，使用默认参数")
                 # Defaults already set in init? No, setting them now if missing
@@ -913,6 +914,7 @@ class PolymarketBotV3:
                 if not hasattr(self, 'fee_pct'): self.fee_pct = 0.03
                 if not hasattr(self, 'obi_threshold'): self.obi_threshold = 1.5
                 if not hasattr(self, 'trade_amount_usd'): self.trade_amount_usd = 1.0
+                if not hasattr(self, 'min_liquidity_usd'): self.min_liquidity_usd = 200
                 if not hasattr(self, 'execution_enabled'): self.execution_enabled = False
                 if not hasattr(self, 'paper_trade'): self.paper_trade = False
                 if not hasattr(self, 'live_trading_enabled'): self.live_trading_enabled = False
@@ -1407,8 +1409,8 @@ class PolymarketBotV3:
                     target_dir = "DOWN"
                 
                 # Check 1: Do we have enough Ask Depth to buy?
-                if target_liq["ask_depth"] < 200:
-                    logger.info(f"🛑 流动性不足: Ask Depth ${target_liq['ask_depth']:.0f} < $200 - 跳过")
+                if target_liq["ask_depth"] < self.min_liquidity_usd:
+                    logger.info(f"🛑 流动性不足: Ask Depth ${target_liq['ask_depth']:.0f} < ${self.min_liquidity_usd} - 跳过")
                     continue
                     
                 # Check 2: Liquidity Ratio
