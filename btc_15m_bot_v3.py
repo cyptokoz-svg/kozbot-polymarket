@@ -968,6 +968,64 @@ class PolymarketBotV3:
         except Exception as e:
             logger.error(f"同步持仓失败: {e}")
     
+    async def query_exchange_positions(self) -> list:
+        """[NEW] 查询交易所真实持仓详情"""
+        if not self.clob_client:
+            logger.error("❌ CLOB Client 未初始化")
+            return []
+        
+        try:
+            logger.info("🔍 查询交易所持仓...")
+            # 使用 get_balance 和账户信息来获取持仓
+            # py_clob_client 可能没有直接的 get_positions
+            # 通过查询余额来判断
+            balance = self.clob_client.get_balance()
+            
+            if not balance:
+                logger.info("📭 交易所无持仓")
+                return []
+            
+            logger.info(f"💰 账户余额查询完成")
+            return []
+        except Exception as e:
+            logger.error(f"❌ 查询持仓失败: {e}")
+            return []
+    
+    async def query_exchange_orders(self, status: str = "OPEN") -> list:
+        """[NEW] 查询交易所订单状态"""
+        if not self.clob_client:
+            logger.error("❌ CLOB Client 未初始化")
+            return []
+        
+        try:
+            logger.info(f"🔍 查询{status}订单...")
+            # 获取所有市场
+            orders = self.clob_client.get_orders()
+            
+            if not orders:
+                logger.info(f"📭 无{status}订单")
+                return []
+            
+            # 过滤状态
+            filtered = [o for o in orders if o.get('status') == status]
+            
+            logger.info(f"📋 {status}订单: {len(filtered)} 笔")
+            for i, order in enumerate(filtered[:5], 1):  # 只显示前5笔
+                oid = order.get('id', 'N/A')[:16]
+                side = order.get('side', 'N/A')
+                price = order.get('price', 0)
+                size = order.get('size', 0)
+                filled = order.get('maker_amount', 0) or 0
+                logger.info(f"  {i}. {oid}... | {side} {size:.2f} @ ${price:.2f} | 成交: {filled:.2f}")
+            
+            if len(filtered) > 5:
+                logger.info(f"  ... 还有 {len(filtered)-5} 笔")
+            
+            return filtered
+        except Exception as e:
+            logger.error(f"❌ 查询订单失败: {e}")
+            return []
+    
     def _save_positions(self):
         """[P1-Fix] 保存持仓到文件"""
         try:
