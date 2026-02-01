@@ -1742,7 +1742,13 @@ class PolymarketBotV3:
             
             # [P1-Fix] 优先检查止损
             if pnl_pct < -self.stop_loss_pct:
-                if p.get("exit_order_id") is None:  # 还未挂出场单
+                if self.paper_trade:
+                    # [Fix] 模拟交易直接记录止损
+                    logger.warning(f"🛑 [模拟] 止损触发! {p['direction']} PnL: {pnl_pct:.1%}")
+                    self._log_paper_exit(p, "STOP_LOSS_PAPER", exit_price, pnl_pct)
+                    self.positions.remove(p)
+                    self._save_positions()
+                elif p.get("exit_order_id") is None:  # 实盘还未挂出场单
                     logger.warning(f"🛑 止损触发! {p['direction']} 当前PnL: {pnl_pct:.1%}，准备挂出场单...")
                     await self._place_exit_order(market, p, "STOP_LOSS", current_bid)
                 else:
@@ -1755,7 +1761,13 @@ class PolymarketBotV3:
             if tp_price >= 0.99: tp_price = 0.99
             
             if current_bid >= tp_price:
-                if p.get("exit_order_id") is None:  # 还未挂出场单
+                if self.paper_trade:
+                    # [Fix] 模拟交易直接记录止盈
+                    logger.info(f"💰 [模拟] 止盈触发! {p['direction']} PnL: {pnl_pct:.1%}")
+                    self._log_paper_exit(p, "TAKE_PROFIT_PAPER", exit_price, pnl_pct)
+                    self.positions.remove(p)
+                    self._save_positions()
+                elif p.get("exit_order_id") is None:  # 实盘还未挂出场单
                     logger.info(f"💰 止盈触发! {p['direction']} 当前PnL: {pnl_pct:.1%}，准备挂出场单...")
                     await self._place_exit_order(market, p, "TAKE_PROFIT", current_bid)
                 else:
@@ -1779,6 +1791,20 @@ class PolymarketBotV3:
         if remaining < 0:
             remaining += 60
         return remaining
+
+    def _log_paper_exit(self, position: dict, exit_type: str, exit_price: float, pnl_pct: float):
+        """[Fix] 统一记录模拟交易出场日志"""
+        self.trade_logger.log({
+            "time": datetime.now(timezone.utc).isoformat(),
+            "type": exit_type,
+            "market": position.get("market_slug", ""),
+            "direction": position["direction"],
+            "entry_price": position["entry_price"],
+            "exit_price": exit_price,
+            "pnl": pnl_pct,
+            "mode": "PAPER"
+        })
+        self._notify_user(f"✅ [模拟] {exit_type.replace('_PAPER', '')} @ ${exit_price:.2f}\nPnL: {pnl_pct*100:.1f}%")
 
     def _notify_user(self, message):
         """Send push notification via Telegram Bot API directly"""
@@ -2044,10 +2070,12 @@ class PolymarketBotV3:
                  "time": datetime.now(timezone.utc).isoformat(),
                  "type": "V3_SMART",
                  "direction": direction,
-                 "price": price,
+                 "entry_price": price,  # [Fix] 统一使用 entry_price
                  "shares": shares,  # [P2-Fix] 记录份额
                  "strike": market.strike_price,
-                 "fee": self.fee_pct
+                 "fee": self.fee_pct,
+                 "market": market.slug,  # [Fix] 添加 market 字段
+                 "mode": "LIVE"  # [Fix] 添加 mode 字段
              }
              
              # Log Liquidity Stats for ML Training
