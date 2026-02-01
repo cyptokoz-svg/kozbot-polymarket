@@ -1994,8 +1994,7 @@ class PolymarketBotV3:
                      shares = amount_usd / price
                      shares = round(shares, 4)
                      
-                     # [NOTIFY] 实时通知（无延迟）
-                     self._notify_user(f"🚀 实盘执行: {direction} {shares:.2f}份 @ ${price:.2f} (Total: ${amount_usd:.2f})")
+                     # [Fix] 通知移至订单成功后发送
                      
                      order_args = OrderArgs(
                          price=price,
@@ -2255,7 +2254,7 @@ class PolymarketBotV3:
         try:
             self.clob_client.cancel(order_id)
             logger.info(f"✅ 撤单请求已发送: {order_id[:8]}")
-            # self._notify_user(f"🗑️ 撤单成功 (追单模式)\n订单ID: {order_id[:8]}...")
+            self._notify_user(f"🗑️ 挂单5秒未成交，已撤单\n订单ID: {order_id[:8]}...\n等待重新挂单")
             
             # 关键：从持仓列表中移除，以便主循环下一轮 (2秒后) 检测到无持仓，
             # 从而根据最新价格重新计算 Edge 并发起新挂单 (即“追单”)
