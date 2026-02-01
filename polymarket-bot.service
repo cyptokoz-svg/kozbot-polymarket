@@ -5,8 +5,8 @@ After=network.target
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/home/ubuntu/clawd/polymarket-bot
-ExecStart=/home/ubuntu/clawd/polymarket-bot/venv/bin/python btc_15m_bot_v3.py
+WorkingDirectory=/home/ubuntu/clawd/bots/polymarket
+ExecStart=/home/ubuntu/clawd/bots/polymarket/venv/bin/python btc_15m_bot_v3.py
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
