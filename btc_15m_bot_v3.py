@@ -28,6 +28,132 @@ import joblib
 from dotenv import load_dotenv
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import OrderArgs, OrderType
+
+# [Auto-Healing] Crash recovery and self-healing system
+class AutoHealer:
+    """Monitors bot health and automatically applies fixes"""
+    def __init__(self):
+        self.crash_count = 0
+        self.crash_history = []
+        self.healing_actions = []
+        self.last_restart = time.time()
+        
+    def analyze_crash(self, error_msg: str, stack_trace: str) -> dict:
+        """Analyze crash type and determine healing action"""
+        error_lower = (error_msg + stack_trace).lower()
+        
+        # Pattern matching for known issues
+        if "websocket" in error_lower or "connection" in error_lower:
+            return {
+                "type": "websocket_failure",
+                "action": "disable_websocket",
+                "severity": "high"
+            }
+        elif "memory" in error_lower or "oom" in error_lower:
+            return {
+                "type": "memory_issue",
+                "action": "reduce_memory_usage",
+                "severity": "critical"
+            }
+        elif "timeout" in error_lower or "api" in error_lower:
+            return {
+                "type": "api_timeout",
+                "action": "increase_timeouts",
+                "severity": "medium"
+            }
+        elif "json" in error_lower or "parse" in error_lower:
+            return {
+                "type": "data_corruption",
+                "action": "clear_caches",
+                "severity": "medium"
+            }
+        else:
+            return {
+                "type": "unknown",
+                "action": "full_restart",
+                "severity": "unknown"
+            }
+    
+    def apply_fix(self, diagnosis: dict) -> bool:
+        """Apply automatic healing action"""
+        action = diagnosis.get("action")
+        
+        try:
+            if action == "disable_websocket":
+                # Create a flag file to indicate WebSocket should not be used
+                flag_file = "/tmp/bot_disable_websocket"
+                with open(flag_file, "w") as f:
+                    f.write(f"Disabled at {datetime.now(timezone.utc).isoformat()}")
+                self.healing_actions.append(f"Created {flag_file}")
+                return True
+                
+            elif action == "clear_caches":
+                # Clear potential corrupted cache files
+                cache_files = [
+                    "/tmp/*.cache",
+                    "/home/ubuntu/clawd/bots/polymarket/*.pyc",
+                    "/home/ubuntu/clawd/bots/polymarket/__pycache__/*"
+                ]
+                import glob
+                for pattern in cache_files:
+                    for f in glob.glob(pattern):
+                        try:
+                            os.remove(f)
+                        except:
+                            pass
+                self.healing_actions.append("Cleared cache files")
+                return True
+                
+            elif action == "reduce_memory_usage":
+                # Force garbage collection
+                import gc
+                gc.collect()
+                self.healing_actions.append("Forced garbage collection")
+                return True
+                
+            elif action == "increase_timeouts":
+                # Will be applied on restart via config
+                config_patch = {"timeout_multiplier": 2.0}
+                with open("/tmp/bot_timeout_patch.json", "w") as f:
+                    json.dump(config_patch, f)
+                self.healing_actions.append("Created timeout patch")
+                return True
+                
+            elif action == "full_restart":
+                self.healing_actions.append("Standard full restart")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Auto-healing failed: {e}")
+            return False
+        
+        return True
+    
+    def record_crash(self, error_msg: str, stack_trace: str):
+        """Record crash for analysis"""
+        self.crash_count += 1
+        self.crash_history.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "error": error_msg,
+            "count": self.crash_count
+        })
+        
+        # Analyze and heal
+        diagnosis = self.analyze_crash(error_msg, stack_trace)
+        success = self.apply_fix(diagnosis)
+        
+        return diagnosis, success
+    
+    def get_health_report(self) -> str:
+        """Generate health report"""
+        uptime = time.time() - self.last_restart
+        return f"""
+🩺 Auto-Healer Report:
+- Crashes: {self.crash_count}
+- Uptime: {uptime/60:.1f} minutes
+- Healing actions: {len(self.healing_actions)}
+- Last actions: {self.healing_actions[-3:] if self.healing_actions else 'None'}
+"""
 from py_clob_client.order_builder.constants import BUY
 
 # [Added for Auto-Redeem]
@@ -1820,13 +1946,15 @@ class WebSocketManagerV3:
         if self.ws: await self.ws.close()
 
 async def main_loop_with_restart():
-    """[CRITICAL-Fix] Main loop with crash recovery"""
+    """[CRITICAL-Fix] Main loop with crash recovery and auto-healing"""
     restart_count = 0
     max_restarts = 100  # Prevent infinite restart loops
+    healer = AutoHealer()
     
     while restart_count < max_restarts:
         try:
             logger.info(f"🚀 Starting Bot (attempt #{restart_count + 1})")
+            logger.info(healer.get_health_report())
             bot = PolymarketBotV3()
             await bot.run()
             # If run() returns normally, break the loop
@@ -1839,18 +1967,38 @@ async def main_loop_with_restart():
             
         except Exception as e:
             restart_count += 1
+            error_msg = str(e)
+            
+            # Get stack trace
+            import traceback
+            stack_trace = traceback.format_exc()
+            
             logger.critical(f"💥 CRITICAL ERROR - Bot crashed: {e}")
-            logger.critical(f"💥 Stack trace:", exc_info=True)
+            logger.critical(f"💥 Stack trace:\n{stack_trace}")
+            
+            # Auto-healing
+            diagnosis, healed = healer.record_crash(error_msg, stack_trace)
+            logger.info(f"🩺 Auto-healer diagnosis: {diagnosis['type']}")
+            logger.info(f"🩺 Healing action applied: {healed}")
+            logger.info(f"🩺 Actions taken: {healer.healing_actions[-1:]}")
+            
             logger.critical(f"🔄 Restarting in 10 seconds... (attempt {restart_count}/{max_restarts})")
             
-            # Notify user of crash
+            # Notify user of crash with healing info
             try:
                 import requests
                 TOKEN_FILE = "/home/ubuntu/clawd/.telegram_bot_token"
                 if os.path.exists(TOKEN_FILE):
                     with open(TOKEN_FILE, 'r') as f:
                         token = f.read().strip()
-                    msg = f"🚨 Bot CRASHED!\nError: {str(e)[:100]}\nRestarting... ({restart_count}/{max_restarts})"
+                    heal_msg = f"✅ Auto-fix applied" if healed else f"⚠️ Auto-fix failed"
+                    msg = (
+                        f"🚨 Bot CRASHED #{restart_count}!\n"
+                        f"Error: {error_msg[:80]}\n"
+                        f"Type: {diagnosis['type']}\n"
+                        f"{heal_msg}\n"
+                        f"Restarting..."
+                    )
                     requests.post(
                         f"https://api.telegram.org/bot{token}/sendMessage",
                         data={"chat_id": "1640598145", "text": msg},
