@@ -31,6 +31,10 @@ class RelayerV2Client:
     """Polymarket Relayer V2 Client with Builder Authentication"""
     
     def __init__(self):
+        # Ensure env vars are loaded
+        from dotenv import load_dotenv
+        load_dotenv('.env', override=True)
+        
         self.api_key = os.getenv("POLY_BUILDER_API_KEY")
         self.api_secret = os.getenv("POLY_BUILDER_API_SECRET")
         self.passphrase = os.getenv("POLY_BUILDER_API_PASSPHRASE")
@@ -44,20 +48,41 @@ class RelayerV2Client:
         
         logger.info(f"RelayerV2Client initialized for Safe: {self.safe_address[:10]}...")
     
-    def _generate_signature(self, timestamp: str) -> str:
+    def _decode_secret(self) -> bytes:
+        """Decode Builder API secret with proper padding handling"""
+        secret = self.api_secret
+        
+        # Try base64 decoding with padding fix
+        for i in range(4):  # Try 0-3 padding chars
+            try:
+                padded = secret + ('=' * i)
+                return base64.b64decode(padded)
+            except:
+                continue
+        
+        # Fallback to raw secret
+        logger.warning("Base64 decode failed, using raw secret")
+        return secret.encode('utf-8')
+    
+    def _generate_signature(self, timestamp: str, method: str, path: str, body: str = "") -> str:
         """Generate HMAC signature for relayer authentication"""
-        message = timestamp + "GET" + "/v1/transaction"
+        # [CRITICAL] message = millisecond_timestamp + method + path + compact_body
+        message = timestamp + method + path + body
+        
+        # Decode secret properly
+        secret_bytes = self._decode_secret()
+        
         signature = hmac.new(
-            self.api_secret.encode('utf-8'),
+            secret_bytes,
             message.encode('utf-8'),
             hashlib.sha256
         ).digest()
         return base64.b64encode(signature).decode('utf-8')
     
-    def _get_headers(self) -> Dict[str, str]:
+    def _get_headers(self, method: str, path: str, body: str) -> Dict[str, str]:
         """Get authentication headers for relayer requests"""
-        timestamp = str(int(time.time()))
-        signature = self._generate_signature(timestamp)
+        timestamp = str(int(time.time() * 1000))  # [CRITICAL] Must be 13-digit milliseconds
+        signature = self._generate_signature(timestamp, method, path, body)
         
         return {
             "Content-Type": "application/json",
@@ -108,18 +133,27 @@ class RelayerV2Client:
         tx = self._build_redeem_transaction(condition_id, index_sets)
         
         # Prepare request body
-        body = {
+        body_dict = {
             "type": "SAFE",
             "from": self.safe_address,
             "transactions": [tx]
         }
         
+        # [CRITICAL] Use compact JSON (no spaces) - separators=(',', ':')
+        body_json = json.dumps(body_dict, separators=(',', ':'))
+        
         try:
-            headers = self._get_headers()
-            url = f"{RELAYER_V2_URL}/v1/transaction"
+            path = "/submit"
+            method = "POST"
+            headers = self._get_headers(method, path, body_json)
+            url = f"{RELAYER_V2_URL}{path}"
             
             logger.info(f"Sending to relayer: {url}")
-            resp = requests.post(url, json=body, headers=headers, timeout=30)
+            logger.info(f"Body (compact): {body_json[:100]}...")
+            logger.info(f"Path for signature: {path}")
+            
+            # Send with compact JSON body
+            resp = requests.post(url, data=body_json, headers=headers, timeout=30)
             
             if resp.status_code in [200, 201]:
                 result = resp.json()
@@ -154,8 +188,12 @@ class RelayerV2Client:
     def get_transaction_status(self, transaction_id: str) -> Dict:
         """Check status of a submitted transaction"""
         try:
-            headers = self._get_headers()
-            url = f"{RELAYER_V2_URL}/v1/transaction/{transaction_id}"
+            path = f"/transaction/{transaction_id}"
+            method = "GET"
+            body = ""  # GET request has no body
+            
+            headers = self._get_headers(method, path, body)
+            url = f"{RELAYER_V2_URL}{path}"
             
             resp = requests.get(url, headers=headers, timeout=10)
             
