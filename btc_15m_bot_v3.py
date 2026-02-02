@@ -2080,21 +2080,38 @@ class PolymarketBotV3:
                      try:
                          # [Fix] Use create_and_post_order to actually submit the order
                          order_result = self.clob_client.create_and_post_order(order_args)
+                         
+                         # [DEBUG] 打印完整响应
+                         logger.info(f"[DEBUG] 订单响应: {order_result}")
+                         
                          order_id = order_result.get("order_id") if order_result else None
                          
                          if order_id:
                              logger.info(f"✅ 订单提交成功: {order_id}")
                              self._notify_user(f"✅ 实盘已提交: {direction} {shares:.2f}份 @ ${price:.2f}\n订单ID: {order_id[:16]}...")
                              
-                             # [P0-Fix] 更新持仓记录订单ID
-                             position["order_id"] = order_id
-                             position["status"] = "PENDING"  # 等待成交
+                             # [CRITICAL-Fix] 先创建持仓记录，包含 order_id
+                             position = {
+                                 "market_slug": market.slug,
+                                 "direction": direction,
+                                 "entry_price": price,
+                                 "shares": shares,
+                                 "size": size,
+                                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                                 "tp_placed": False,
+                                 "sl_placed": False,
+                                 "status": "PENDING",  # 等待成交
+                                 "order_id": order_id,  # 保存订单ID
+                                 "exit_checked": False
+                             }
+                             self.positions.append(position)
+                             self._save_positions()
                              
                              # [P0-Fix] 异步跟踪订单状态
                              asyncio.create_task(self._track_order(order_id, position))
                          else:
-                             logger.error("❌ 订单提交失败: 无订单ID返回")
-                             self._notify_user("❌ 订单提交失败")
+                             logger.error(f"❌ 订单提交失败: 无订单ID返回. 响应: {order_result}")
+                             self._notify_user(f"❌ 订单提交失败\n响应: {order_result}")
                              return
                      except Exception as e:
                          logger.error(f"❌ 下单异常: {e}")
@@ -2105,23 +2122,6 @@ class PolymarketBotV3:
                      self._notify_user("❌ 实盘失败: CLOB Client 未连接")
              except Exception as e:
                  self._notify_user(f"❌ 下单失败: {e}")
-             
-             # Record Position [P2-Fix] 添加 shares 和 order_id
-             position = {
-                 "market_slug": market.slug,
-                 "direction": direction,
-                 "entry_price": price,
-                 "shares": shares,  # [P2-Fix] 记录份额
-                 "size": size,
-                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                 "tp_placed": False,
-                 "sl_placed": False,
-                 "status": "OPEN",
-                 "order_id": None,  # [P2-Fix] 订单ID占位
-                 "exit_checked": False
-             }
-             self.positions.append(position)
-             self._save_positions()  # [P1-Fix] 保存持仓
 
              trade_record = {
                  "time": datetime.now(timezone.utc).isoformat(),
