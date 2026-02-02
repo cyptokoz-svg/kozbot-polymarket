@@ -1,0 +1,16 @@
+{
+    "stop_loss_pct": 0.35,
+    "safety_margin_pct": 0.0006,
+    "min_edge": 0.15,
+    "fee_pct": 0.03,
+    "obi_threshold": 1.8,
+    "trade_amount_usd": 5.0,
+    "min_liquidity_usd": 50,
+    "_security_note": "Tokens moved to environment variables",
+    "max_positions": 1,
+    "execution_enabled": true,
+    "paper_trade": true,
+    "live_trading_enabled": false,
+    "auto_redeem_enabled": true,
+    "log_level": "INFO"
+}

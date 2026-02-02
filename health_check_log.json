@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-02-02T17:18:00Z",
+  "status": "HEALTHY",
+  "service": "polymarket-bot.service",
+  "pid": 77679,
+  "uptime_minutes": 60,
+  "memory_mb": 132.5,
+  "checks": {
+    "systemctl": "active",
+    "process_running": true,
+    "errors_found": false,
+    "restart_required": false
+  },
+  "issues": [
+    {
+      "type": "websocket_pong_timeout",
+      "severity": "low",
+      "description": "Polymarket server pong delays causing reconnects every ~40s",
+      "auto_healed": true
+    }
+  ],
+  "current_market": "Bitcoin Up or Down - Feb 2, 12:15PM-12:30PM ET",
+  "resolution_time": "2026-02-02T17:30:00Z"
+}

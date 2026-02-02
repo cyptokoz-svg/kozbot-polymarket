@@ -1,1 +1,22 @@
-{"timestamp":"2026-02-01T10:49:00Z","status":"healthy","pid":21152,"uptime_minutes":394,"memory_mb":125.9,"errors_found":0,"action_taken":"none","btc_price":78490.5,"check_type":"cron-health-check"}
+[
+  {
+    "timestamp": "2026-02-02T16:17:56Z",
+    "type": "health_check",
+    "status": "restarted",
+    "message": "Bot was inactive, auto-restarted by health check",
+    "previous_state": "inactive",
+    "pid": 77679,
+    "market": "Bitcoin Up or Down - February 2, 11:15AM-11:30AM ET",
+    "strike_price": 79066.1
+  },
+  {
+    "timestamp": "2026-02-02T18:18:00Z",
+    "type": "health_check",
+    "status": "healthy",
+    "message": "Bot running normally. PID 77679, uptime 2h. Recent activity: TAKE_PROFIT triggered at 18:16. WebSocket auto-recovering from minor timeouts.",
+    "pid": 77679,
+    "uptime_hours": 2,
+    "market": "Bitcoin Up or Down - February 2, 1:15PM-1:30PM ET",
+    "current_btc": 78594.2
+  }
+]
