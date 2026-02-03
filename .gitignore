@@ -18,3 +18,5 @@ venv/
 # Runtime data
 paper_trades.jsonl
 positions.json
+market_state.json
+market_state.tmp
