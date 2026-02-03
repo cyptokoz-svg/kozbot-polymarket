@@ -53,3 +53,8 @@ urllib3==2.6.3
 websockets==16.0
 pandas_ta
 web3
+aiofiles
+flask
+matplotlib
+psutil
+xgboost

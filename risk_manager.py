@@ -44,7 +44,11 @@ class RiskManager:
         
     def check_exit_signal(self, position: dict, current_price: float) -> str:
         """Check stop loss and take profit"""
-        entry_price = position["entry_price"]
+        if not current_price or current_price <= 0:
+            return "HOLD"
+        entry_price = position.get("entry_price") or 0
+        if entry_price <= 0:
+            return "HOLD"
         pnl_pct = (current_price - entry_price) / entry_price
         
         # Stop Loss

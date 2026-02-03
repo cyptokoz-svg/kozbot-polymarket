@@ -6,6 +6,7 @@ from flask import Flask, jsonify, render_template_string
 import json
 from datetime import datetime, timedelta
 import os
+import socket
 
 app = Flask(__name__)
 
@@ -13,6 +14,7 @@ app = Flask(__name__)
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 TRADES_FILE = os.path.join(BOT_DIR, "paper_trades.jsonl")
 POSITIONS_FILE = os.path.join(BOT_DIR, "positions.json")
+MARKET_STATE_FILE = os.path.join(BOT_DIR, "market_state.json")
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -129,6 +131,69 @@ HTML_TEMPLATE = """
     <div class="header">
         <h1>🤖 Polymarket Bot Dashboard</h1>
         <span class="status running">● Running</span>
+        <div id="live-indicator" style="display:none; color:#22c55e; font-size:12px; margin-top:5px;">⚡ LIVE DATA</div>
+    </div>
+    
+    <!-- Real-Time Market Section -->
+    <div class="section" id="market-section">
+        <h2>⚡ Real-Time Market</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <div>
+                <div style="font-size: 12px; color: #94a3b8;">ACTIVE MARKET</div>
+                <div id="market-slug" style="font-size: 16px; font-weight: bold; color: #fff;">Wait...</div>
+            </div>
+            <div style="text-align: right;">
+                 <div style="font-size: 12px; color: #94a3b8;">DATA SOURCE</div>
+                 <div id="data-source" class="badge">Wait...</div>
+            </div>
+        </div>
+        
+        <div class="stats-grid" style="margin-bottom: 0;">
+            <div class="stat-card" style="background: #1e293b;">
+                <h3>BTC Price (Binance)</h3>
+                <div id="btc-price" class="value" style="color: #f59e0b;">---</div>
+            </div>
+            <div class="stat-card" style="background: #1e293b;">
+                <h3>Strike Price</h3>
+                <div id="strike-price" class="value" style="color: #fff;">---</div>
+            </div>
+            <div class="stat-card" style="background: #1e293b;">
+                <h3>Delta (Price - Strike)</h3>
+                <div id="price-delta" class="value">---</div>
+            </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+            <!-- UP Token -->
+            <div style="background: rgba(34, 197, 94, 0.05); padding: 15px; border-radius: 8px; border: 1px solid rgba(34, 197, 94, 0.2);">
+                <div style="color: #22c55e; font-weight: bold; margin-bottom: 10px;">📈 UP TOKEN</div>
+                <div style="display: flex; justify-content: space-between;">
+                    <div>
+                        <div style="font-size: 12px; color: #94a3b8;">BEST ASK</div>
+                        <div id="ask-up" style="font-size: 24px; font-weight: bold;">---</div>
+                    </div>
+                     <div>
+                        <div style="font-size: 12px; color: #94a3b8;">BEST BID</div>
+                        <div id="bid-up" style="font-size: 24px; font-weight: bold; color: #94a3b8;">---</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- DOWN Token -->
+            <div style="background: rgba(239, 68, 68, 0.05); padding: 15px; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.2);">
+                <div style="color: #ef4444; font-weight: bold; margin-bottom: 10px;">📉 DOWN TOKEN</div>
+                <div style="display: flex; justify-content: space-between;">
+                    <div>
+                        <div style="font-size: 12px; color: #94a3b8;">BEST ASK</div>
+                        <div id="ask-down" style="font-size: 24px; font-weight: bold;">---</div>
+                    </div>
+                     <div>
+                        <div style="font-size: 12px; color: #94a3b8;">BEST BID</div>
+                        <div id="bid-down" style="font-size: 24px; font-weight: bold; color: #94a3b8;">---</div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     
     <div class="stats-grid">
@@ -228,6 +293,47 @@ HTML_TEMPLATE = """
     <div style="text-align: center; color: #64748b; margin-top: 30px; font-size: 12px;">
         Last updated: {{ last_updated }} | <a href="/api/stats" style="color: #3b82f6;">API</a>
     </div>
+
+    <script>
+        function updateMarketData() {
+            fetch('/api/market_state')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) return;
+                    
+                    document.getElementById('live-indicator').style.display = 'block';
+                    document.getElementById('market-slug').innerText = data.market_slug || 'No Active Market';
+                    
+                    // Source badge
+                    const sourceEl = document.getElementById('data-source');
+                    sourceEl.innerText = data.source || 'REST';
+                    sourceEl.className = 'badge ' + (data.source === 'WebSocket' ? 'win' : 'loss');
+                    
+                    // Prices
+                    document.getElementById('btc-price').innerText = '$' + (data.btc_price ? data.btc_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '---');
+                    document.getElementById('strike-price').innerText = '$' + (data.strike ? data.strike.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '---');
+                    
+                    // Delta
+                    if (data.btc_price && data.strike) {
+                        const delta = data.btc_price - data.strike;
+                        const deltaEl = document.getElementById('price-delta');
+                        deltaEl.innerText = (delta > 0 ? '+' : '') + delta.toFixed(2);
+                        deltaEl.className = 'value ' + (delta > 0 ? 'positive' : 'negative');
+                    }
+                    
+                    // Orderbook
+                    document.getElementById('ask-up').innerText = data.ask_up ? data.ask_up.toFixed(3) : '---';
+                    document.getElementById('bid-up').innerText = data.bid_up ? data.bid_up.toFixed(3) : '---';
+                    document.getElementById('ask-down').innerText = data.ask_down ? data.ask_down.toFixed(3) : '---';
+                    document.getElementById('bid-down').innerText = data.bid_down ? data.bid_down.toFixed(3) : '---';
+                })
+                .catch(err => console.error(err));
+        }
+        
+        // Poll every 1 second
+        setInterval(updateMarketData, 1000);
+        updateMarketData();
+    </script>
 </body>
 </html>
 """
@@ -288,10 +394,8 @@ def load_positions():
             return data.get('positions', [])
     return []
 
-
-@app.route('/')
-def dashboard():
-    """主面板"""
+def build_dashboard_context():
+    """构建面板数据"""
     trades = load_trades()
     stats = calculate_stats(trades)
     
@@ -321,13 +425,18 @@ def dashboard():
                 'status': pos.get('status', '')
             })
     
-    return render_template_string(
-        HTML_TEMPLATE,
-        stats=stats,
-        recent_trades=list(reversed(recent_trades)),
-        open_positions=open_positions,
-        last_updated=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    )
+    return {
+        'stats': stats,
+        'recent_trades': list(reversed(recent_trades)),
+        'open_positions': open_positions,
+        'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+
+@app.route('/')
+def dashboard():
+    """主面板"""
+    context = build_dashboard_context()
+    return render_template_string(HTML_TEMPLATE, **context)
 
 
 @app.route('/api/stats')
@@ -351,8 +460,44 @@ def api_positions():
     positions = load_positions()
     return jsonify(positions)
 
+@app.route('/api/market_state')
+def api_market_state():
+    """API: 实时行情"""
+    if os.path.exists(MARKET_STATE_FILE):
+        try:
+            with open(MARKET_STATE_FILE, 'r') as f:
+                return jsonify(json.load(f))
+        except:
+            pass
+    return jsonify({"error": "No market state data"})
+
 
 if __name__ == '__main__':
+    host = os.environ.get('DASHBOARD_HOST', '127.0.0.1')
+    port = int(os.environ.get('DASHBOARD_PORT', '5000'))
     print("🚀 Starting Polymarket Bot Dashboard...")
-    print("📊 URL: http://localhost:5000")
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    print(f"📊 URL: http://{host}:{port}")
+    can_bind = True
+    probe = socket.socket()
+    try:
+        probe.bind((host, port))
+    except PermissionError:
+        can_bind = False
+    except OSError as e:
+        if getattr(e, "errno", None) in (1, 13):
+            can_bind = False
+        else:
+            raise
+    finally:
+        probe.close()
+    if not can_bind:
+        output_path = os.path.join(BOT_DIR, "dashboard.html")
+        context = build_dashboard_context()
+        with app.app_context():
+            html = render_template_string(HTML_TEMPLATE, **context)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(html)
+        print("⚠️ Unable to bind local port in this environment.")
+        print(f"✅ Static dashboard saved to: {output_path}")
+    else:
+        app.run(host=host, port=port, debug=False)
