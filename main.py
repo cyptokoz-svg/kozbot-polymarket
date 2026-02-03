@@ -194,7 +194,7 @@ class PolymarketBotV4:
                             
                             self.tui.add_log(f"🔌 Starting WebSocket...")
                             self.ws_manager = MarketWebSocket()
-                            await self.ws_manager.subscribe([token_up, token_down], replace=True, fetch_initial=False)
+                            await self.ws_manager.subscribe([token_up, token_down], replace=True, fetch_initial=True)
                             asyncio.create_task(self.ws_manager.run(auto_reconnect=True))
                             await asyncio.sleep(1)
                         else:
@@ -285,8 +285,9 @@ class PolymarketBotV4:
                                     ob = self.ws_manager.get_orderbook(pos_token)
                                     if ob: exit_price = ob.best_bid
                                 if exit_price is None:
-                                    # Fallback
-                                    pass
+                                    ob = await PolyMarketData.get_orderbook(pos_token)
+                                    if ob and "bids" in ob and len(ob["bids"]) > 0:
+                                        exit_price = float(ob["bids"][0]["price"])
 
                                 if exit_price is not None:
                                     action = self.risk_manager.check_exit_signal(pos, exit_price)

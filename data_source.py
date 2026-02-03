@@ -3,7 +3,6 @@ import logging
 from api_client import request as http_request
 import json
 import asyncio
-import websockets
 import os
 import shutil
 from typing import Optional, Tuple, Dict, List
@@ -73,215 +72,6 @@ class BinanceData:
             logger.warning(f"Error getting historical Binance price: {e}")
             return None
 
-class WebSocketManager:
-    """Polymarket WebSocket Manager"""
-    WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
-    
-    def __init__(self, asset_ids: List[str]):
-        self.asset_ids = asset_ids
-        self.ws = None
-        self.running = False
-        self.data = {}
-        self.callbacks = []
-        self._backoff = 1
-        
-    async def connect(self):
-        self.running = True
-        while self.running:
-            try:
-                async with websockets.connect(
-                    self.WS_URL,
-                    ping_interval=20,
-                    ping_timeout=20,
-                    close_timeout=5
-                ) as ws:
-                    self.ws = ws
-                    logger.info("✅ WebSocket Connected")
-                    self._backoff = 1
-                    
-                    # Subscribe
-                    msg = {
-                        "assets_ids": self.asset_ids,
-                        "asset_ids": self.asset_ids,
-                        "type": "market"
-                    }
-                    await ws.send(json.dumps(msg))
-                    
-                    async for message in ws:
-                        await self._handle_message(message)
-                        
-            except Exception as e:
-                logger.error(f"WebSocket Error: {e}")
-                await asyncio.sleep(self._backoff) # Reconnect delay
-                self._backoff = min(self._backoff * 2, 30)
-                
-    async def close(self):
-        self.running = False
-        if self.ws:
-            try:
-                await self.ws.close()
-            except Exception:
-                pass
-                
-    async def _handle_message(self, message):
-        try:
-            data = json.loads(message)
-            # Process updates (Simplified for V4)
-            if isinstance(data, list):
-                for item in data:
-                    self._update_book(item)
-            else:
-                self._update_book(data)
-        except: pass
-        
-    def _ensure_book(self, asset_id: str):
-        if asset_id not in self.data:
-            self.data[asset_id] = {
-                "bids": {},
-                "asks": {},
-                "best_bid": None,
-                "best_ask": None,
-                "ts": 0.0
-            }
-        return self.data[asset_id]
-
-    def _parse_side_price_size(self, entry):
-        side = None
-        price = None
-        size = None
-        try:
-            if isinstance(entry, dict):
-                side = entry.get("side") or entry.get("type") or entry.get("action")
-                price = entry.get("price")
-                size = entry.get("size") or entry.get("qty") or entry.get("quantity") or entry.get("amount")
-            elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
-                if len(entry) >= 3:
-                    side = entry[0]
-                    price = entry[1]
-                    size = entry[2]
-                else:
-                    price = entry[0]
-                    size = entry[1]
-        except Exception:
-            return None, None, None
-        if side is not None:
-            side = str(side).upper()
-            if side in ("BUY", "BID"):
-                side = "BID"
-            elif side in ("SELL", "ASK"):
-                side = "ASK"
-        try:
-            price = float(price) if price is not None else None
-            size = float(size) if size is not None else None
-        except Exception:
-            return side, None, None
-        return side, price, size
-
-    def _apply_snapshot(self, asset_id: str, bids, asks):
-        book = self._ensure_book(asset_id)
-        book["bids"] = {}
-        book["asks"] = {}
-        for entry in bids or []:
-            _, price, size = self._parse_side_price_size(entry)
-            if price is None or size is None:
-                continue
-            if size > 0:
-                book["bids"][price] = size
-        for entry in asks or []:
-            _, price, size = self._parse_side_price_size(entry)
-            if price is None or size is None:
-                continue
-            if size > 0:
-                book["asks"][price] = size
-        self._recalc_best(book)
-
-    def _apply_delta(self, asset_id: str, side: str, price: float, size: float):
-        book = self._ensure_book(asset_id)
-        if side == "BID":
-            if size <= 0:
-                book["bids"].pop(price, None)
-            else:
-                book["bids"][price] = size
-        elif side == "ASK":
-            if size <= 0:
-                book["asks"].pop(price, None)
-            else:
-                book["asks"][price] = size
-        self._recalc_best(book)
-
-    def _recalc_best(self, book: dict):
-        best_bid = max(book["bids"].keys(), default=None)
-        best_ask = min(book["asks"].keys(), default=None)
-        book["best_bid"] = best_bid
-        book["best_ask"] = best_ask
-        book["ts"] = time.time()
-
-    def _update_book(self, item):
-        if not isinstance(item, dict):
-            return
-        payload = item.get("data") if isinstance(item.get("data"), dict) else item
-        asset_id = payload.get("asset_id") or payload.get("assetId") or payload.get("token_id") or payload.get("tokenId")
-        if not asset_id:
-            return
-
-        bids = payload.get("bids")
-        asks = payload.get("asks")
-        changes = payload.get("changes") or payload.get("deltas") or payload.get("updates")
-
-        if isinstance(bids, list) or isinstance(asks, list):
-            self._apply_snapshot(asset_id, bids or [], asks or [])
-            return
-
-        if isinstance(changes, list):
-            for change in changes:
-                side, price, size = self._parse_side_price_size(change)
-                if side in ("BID", "ASK") and price is not None and size is not None:
-                    self._apply_delta(asset_id, side, price, size)
-            return
-
-        # Fallback to best bid/ask fields
-        best_bid = payload.get("best_bid") or payload.get("bestBid")
-        best_ask = payload.get("best_ask") or payload.get("bestAsk")
-        try:
-            best_bid = float(best_bid) if best_bid is not None else None
-            best_ask = float(best_ask) if best_ask is not None else None
-        except Exception:
-            best_bid = None
-            best_ask = None
-        book = self._ensure_book(asset_id)
-        if best_bid is not None:
-            book["best_bid"] = best_bid
-        if best_ask is not None:
-            book["best_ask"] = best_ask
-        book["ts"] = time.time()
-            
-    def get_price(self, asset_id) -> Optional[float]:
-        # Backward-compat: return best ask if available
-        book = self.data.get(asset_id) or {}
-        ask = book.get("best_ask")
-        if self._is_stale(book):
-            return None
-        return ask
-
-    def get_best_ask(self, asset_id) -> Optional[float]:
-        book = self.data.get(asset_id) or {}
-        if self._is_stale(book):
-            return None
-        return book.get("best_ask")
-
-    def get_best_bid(self, asset_id) -> Optional[float]:
-        book = self.data.get(asset_id) or {}
-        if self._is_stale(book):
-            return None
-        return book.get("best_bid")
-
-    def _is_stale(self, book: dict) -> bool:
-        ttl = float(config.get("ws_stale_sec", 2) or 0)
-        if ttl <= 0:
-            return False
-        ts = book.get("ts", 0)
-        return (time.time() - ts) > ttl
-
 class PolyMarketData:
     """Polymarket REST Data Source"""
     GAMMA_API = "https://gamma-api.polymarket.com"
@@ -314,9 +104,13 @@ class PolyMarketData:
             cached = PolyMarketData._cache_get(PolyMarketData._orderbook_cache, token_id, ttl)
             if cached is not None:
                 return cached
+            # Try /book?token_id=... then fallback to /book/{token_id}
             url = f"{PolyMarketData.CLOB_API}/book"
             params = {"token_id": token_id}
             resp = await http_request("GET", url, params=params, timeout=5)
+            if resp.status_code == 404:
+                url = f"{PolyMarketData.CLOB_API}/book/{token_id}"
+                resp = await http_request("GET", url, timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
                 

@@ -7,10 +7,10 @@ Provides WebSocket connectivity for Polymarket CLOB API:
 - Trade events
 
 Example:
-    from src.websocket_client import MarketWebSocket
+    from websocket_client import MarketWebSocket
 
-    async def on_book_update(data):
-        print(f"Book update: {data}")
+    async def on_book_update(snapshot):
+        print(f"Book update: {snapshot.asset_id} {snapshot.best_bid}/{snapshot.best_ask}")
 
     ws = MarketWebSocket()
     ws.on_book = on_book_update
@@ -654,101 +654,3 @@ class MarketWebSocket:
         """Stop the WebSocket client."""
         self._running = False
 
-
-class OrderbookManager:
-    """
-    High-level orderbook manager with WebSocket subscription.
-
-    Provides a simpler interface for tracking multiple orderbooks
-    with callbacks for price updates.
-
-    Example:
-        manager = OrderbookManager()
-
-        @manager.on_price_update
-        async def handle_price(asset_id: str, mid_price: float):
-            print(f"{asset_id}: {mid_price}")
-
-        await manager.start(["token_1", "token_2"])
-    """
-
-    def __init__(self):
-        """Initialize orderbook manager."""
-        self._ws = MarketWebSocket()
-        self._price_callback: Optional[Callable[[str, float, float, float], None]] = None
-        self._connected = False
-
-        # Set up internal callbacks
-        @self._ws.on_book
-        async def on_book(snapshot: OrderbookSnapshot):
-            if self._price_callback:
-                try:
-                    result = self._price_callback(
-                        snapshot.asset_id,
-                        snapshot.mid_price,
-                        snapshot.best_bid,
-                        snapshot.best_ask
-                    )
-                    if asyncio.iscoroutine(result):
-                        await result
-                except Exception as e:
-                    logger.error(f"Error in price callback: {e}")
-
-        @self._ws.on_connect
-        def on_connect():  # pyright: ignore[reportUnusedFunction]
-            self._connected = True
-
-        @self._ws.on_disconnect
-        def on_disconnect():  # pyright: ignore[reportUnusedFunction]
-            self._connected = False
-
-    @property
-    def is_connected(self) -> bool:
-        """Check if connected."""
-        return self._connected
-
-    def get_price(self, asset_id: str) -> float:
-        """Get current mid price for asset."""
-        return self._ws.get_mid_price(asset_id)
-
-    def get_orderbook(self, asset_id: str) -> Optional[OrderbookSnapshot]:
-        """Get cached orderbook for asset."""
-        return self._ws.get_orderbook(asset_id)
-
-    def on_price_update(
-        self,
-        callback: Callable[[str, float, float, float], None]
-    ) -> Callable[[str, float, float, float], None]:
-        """
-        Set callback for price updates.
-
-        Callback receives: asset_id, mid_price, best_bid, best_ask
-        """
-        self._price_callback = callback
-        return callback
-
-    async def start(self, asset_ids: List[str]) -> None:
-        """
-        Start tracking orderbooks.
-
-        Args:
-            asset_ids: Token IDs to track
-        """
-        await self._ws.subscribe(asset_ids)
-        await self._ws.run(auto_reconnect=True)
-
-    async def subscribe(self, asset_ids: List[str]) -> bool:
-        """Subscribe to additional assets."""
-        return await self._ws.subscribe_more(asset_ids)
-
-    async def unsubscribe(self, asset_ids: List[str]) -> bool:
-        """Unsubscribe from assets."""
-        return await self._ws.unsubscribe(asset_ids)
-
-    def stop(self) -> None:
-        """Stop the manager."""
-        self._ws.stop()
-
-    async def close(self) -> None:
-        """Close connection."""
-        await self._ws.disconnect()
